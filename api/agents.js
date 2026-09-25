@@ -1,5 +1,4 @@
 export default async function handler(req, res) {
-  // CORS headers
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
@@ -15,107 +14,61 @@ export default async function handler(req, res) {
       return res.status(400).json({ success: false, error: 'Invalid or missing zip code. Must be 5 digits.' });
     }
 
-    const agents = [];
-    const MAX_PAGES = 3;
+    const apiKey = process.env.RAPIDAPI_KEY;
+    if (!apiKey) {
+      return res.status(500).json({
+        success: false,
+        error: 'API key not configured. Add RAPIDAPI_KEY to your Vercel environment variables.'
+      });
+    }
 
-    for (let page = 1; page <= MAX_PAGES; page++) {
-      const url = page === 1 
-        ? `https://www.realtor.com/realestateagents/${zipCode}` 
-        : `https://www.realtor.com/realestateagents/${zipCode}/pg-${page}`;
+    const agents = [];
+    const PAGES_TO_FETCH = 3;
+    const PER_PAGE = 20;
+
+    for (let page = 0; page < PAGES_TO_FETCH; page++) {
+      const offset = page * PER_PAGE;
+
+      const url = `https://realtor16.p.rapidapi.com/agents/list?postal_code=${zipCode}&offset=${offset}&limit=${PER_PAGE}`;
 
       const response = await fetch(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
-          'Accept-Language': 'en-US,en;q=0.5',
-          'Referer': 'https://www.realtor.com/'
+          'X-RapidAPI-Key': apiKey,
+          'X-RapidAPI-Host': 'realtor16.p.rapidapi.com'
         }
       });
 
       if (!response.ok) {
-        if (response.status === 404 && page > 1) {
+        if (response.status === 429) {
+          console.warn('RapidAPI rate limit hit, returning what we have so far');
           break;
         }
-        throw new Error(`Failed to fetch realtor.com data: ${response.statusText}`);
+        if (page === 0) {
+          const errorText = await response.text();
+          throw new Error(`API request failed (${response.status}): ${errorText.substring(0, 200)}`);
+        }
+        break;
       }
 
-      const html = await response.text();
-      const nextDataMatch = html.match(/<script id="__NEXT_DATA__" type="application\/json">(.*?)<\/script>/);
+      const data = await response.json();
 
-      if (!nextDataMatch || !nextDataMatch[1]) {
-        if (page === 1) {
-            throw new Error('__NEXT_DATA__ not found in the response. Realtor.com structure may have changed.');
-        } else {
-            break;
+      const agentList = findAgentList(data);
+      if (!agentList || agentList.length === 0) {
+        if (page === 0 && agents.length === 0) {
+          return res.status(200).json({
+            success: true,
+            agents: [],
+            total_found: 0,
+            zip_code: zipCode
+          });
         }
+        break;
       }
 
-      let data;
-      try {
-        data = JSON.parse(nextDataMatch[1]);
-      } catch (e) {
-        throw new Error('Failed to parse __NEXT_DATA__ JSON');
-      }
-
-      const pageAgents = findAgentArray(data);
-      if (!pageAgents || pageAgents.length === 0) {
-        if (page === 1) {
-            throw new Error('Could not find agent list in __NEXT_DATA__. Structure may have changed.');
-        } else {
-            break; // No agents on this page, probably end of results
-        }
-      }
-
-      for (const rawAgent of pageAgents) {
-        const getVal = (obj, path) => path.split('.').reduce((acc, part) => acc && acc[part], obj);
-        
-        let name = rawAgent.person_name || rawAgent.name || rawAgent.full_name || '';
-        if (!name && rawAgent.first_name) {
-            name = `${rawAgent.first_name} ${rawAgent.last_name || ''}`.trim();
-        }
-
-        let phone = '';
-        if (Array.isArray(rawAgent.phones) && rawAgent.phones.length > 0) {
-            phone = rawAgent.phones[0].number || rawAgent.phones[0].ext || '';
-        } else if (rawAgent.phone_numbers && rawAgent.phone_numbers.length > 0) {
-            phone = rawAgent.phone_numbers[0];
-        } else if (rawAgent.office && rawAgent.office.phones && rawAgent.office.phones.length > 0) {
-             phone = rawAgent.office.phones[0].number;
-        }
-
-        const email = rawAgent.email || null;
-        
-        const review_count = parseInt(rawAgent.review_count || rawAgent.ratings_count || 0, 10);
-        const rating = parseFloat(rawAgent.rating || rawAgent.star_rating || rawAgent.agent_rating || 0);
-        
-        let recently_sold_count = parseInt(
-            rawAgent.recently_sold_count || 
-            getVal(rawAgent, 'recent_sales.count') || 
-            getVal(rawAgent, 'sold_properties') || 0, 10);
-
-        let experience_years = 0;
-        const currentYear = new Date().getFullYear();
-        if (rawAgent.first_year) {
-            experience_years = currentYear - parseInt(rawAgent.first_year, 10);
-        } else if (rawAgent.agent_active_start_year) {
-            experience_years = currentYear - parseInt(rawAgent.agent_active_start_year, 10);
-        } else if (rawAgent.experience_years) {
-            experience_years = parseInt(rawAgent.experience_years, 10);
-        }
-        
-        const testimonials_count = parseInt(rawAgent.recommendations_count || rawAgent.testimonials_count || 0, 10);
-
-        if (name) {
-             agents.push({
-                name,
-                phone,
-                email,
-                review_count,
-                rating,
-                recently_sold_count,
-                experience_years,
-                testimonials_count
-            });
+      for (const raw of agentList) {
+        const agent = extractAgent(raw);
+        if (agent.name) {
+          agents.push(agent);
         }
       }
     }
@@ -136,24 +89,108 @@ export default async function handler(req, res) {
   }
 }
 
-function findAgentArray(obj, depth = 0) {
-  if (depth > 10 || !obj) return null;
+function extractAgent(raw) {
+  const currentYear = new Date().getFullYear();
 
-  if (Array.isArray(obj)) {
-    if (obj.length > 0 && typeof obj[0] === 'object' && obj[0] !== null) {
-      if ('advertiser_id' in obj[0] || 'person_name' in obj[0] || 'agent_id' in obj[0] || 'office' in obj[0]) {
-        return obj;
+  let name = '';
+  if (raw.person_name) {
+    name = raw.person_name;
+  } else if (raw.full_name) {
+    name = raw.full_name;
+  } else if (raw.first_name) {
+    name = `${raw.first_name} ${raw.last_name || ''}`.trim();
+  } else if (raw.name) {
+    name = raw.name;
+  }
+
+  let phone = '';
+  if (raw.phones && Array.isArray(raw.phones) && raw.phones.length > 0) {
+    phone = raw.phones[0].number || raw.phones[0].ext || '';
+  } else if (raw.phone) {
+    phone = raw.phone;
+  } else if (raw.office && raw.office.phones && raw.office.phones.length > 0) {
+    phone = raw.office.phones[0].number || '';
+  }
+
+  const email = raw.email || null;
+
+  const review_count = parseInt(
+    raw.review_count || raw.ratings_count || raw.agent_rating?.review_count || 0, 10
+  );
+
+  const rating = parseFloat(
+    raw.rating || raw.agent_rating?.recommended_count_rating ||
+    raw.agent_rating?.rating || raw.star_rating || 0
+  );
+
+  let recently_sold_count = 0;
+  if (raw.recently_sold && raw.recently_sold.count !== undefined) {
+    recently_sold_count = parseInt(raw.recently_sold.count, 10);
+  } else if (raw.recently_sold_count !== undefined) {
+    recently_sold_count = parseInt(raw.recently_sold_count, 10);
+  } else if (raw.sale_count_12_months !== undefined) {
+    recently_sold_count = parseInt(raw.sale_count_12_months, 10);
+  }
+
+  let experience_years = 0;
+  if (raw.first_year) {
+    experience_years = currentYear - parseInt(raw.first_year, 10);
+  } else if (raw.agent_active_start_year) {
+    experience_years = currentYear - parseInt(raw.agent_active_start_year, 10);
+  } else if (raw.experience_years) {
+    experience_years = parseInt(raw.experience_years, 10);
+  }
+
+  const testimonials_count = parseInt(
+    raw.recommendations_count || raw.testimonials_count || 0, 10
+  );
+
+  return {
+    name,
+    phone,
+    email,
+    review_count,
+    rating,
+    recently_sold_count,
+    experience_years,
+    testimonials_count
+  };
+}
+
+function findAgentList(data) {
+  if (!data) return null;
+
+  if (data.agents && Array.isArray(data.agents)) return data.agents;
+  if (data.data && Array.isArray(data.data)) return data.data;
+  if (data.results && Array.isArray(data.results)) return data.results;
+
+  if (Array.isArray(data)) {
+    if (data.length > 0 && typeof data[0] === 'object' && data[0] !== null) {
+      const first = data[0];
+      if ('person_name' in first || 'full_name' in first || 'advertiser_id' in first || 'office' in first) {
+        return data;
       }
     }
-    for (const item of obj) {
-      const found = findAgentArray(item, depth + 1);
-      if (found) return found;
+  }
+
+  if (typeof data === 'object') {
+    for (const key of Object.keys(data)) {
+      const val = data[key];
+      if (Array.isArray(val) && val.length > 0 && typeof val[0] === 'object' && val[0] !== null) {
+        const first = val[0];
+        if ('person_name' in first || 'full_name' in first || 'advertiser_id' in first || 'agent_id' in first) {
+          return val;
+        }
+      }
     }
-  } else if (typeof obj === 'object') {
-    for (const key of Object.keys(obj)) {
-      const found = findAgentArray(obj[key], depth + 1);
-      if (found) return found;
+
+    for (const key of Object.keys(data)) {
+      if (typeof data[key] === 'object' && !Array.isArray(data[key])) {
+        const found = findAgentList(data[key]);
+        if (found) return found;
+      }
     }
   }
+
   return null;
 }
