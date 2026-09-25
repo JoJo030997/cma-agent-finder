@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CMA Agent Finder</title>
+  <style>
+    :root {
+      --sidebar-bg: #1a1a2e;
+      --content-bg: #f5f1eb;
+      --accent-green: #2d8a4e;
+      --accent-green-hover: #236b3d;
+      --text-dark: #2c2c2c;
+      --text-light: #ffffff;
+      --table-border: #e0dcd5;
+      --table-alt-row: #f9f7f4;
+      --star-gold: #e8a838;
+      --error-red: #d32f2f;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      color: var(--text-dark);
+      background-color: var(--content-bg);
+      display: flex;
+      min-height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: 220px;
+      background-color: var(--sidebar-bg);
+      color: var(--text-light);
+      padding: 2rem 1.5rem;
+      position: fixed;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .sidebar-brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .brand-icon {
+      font-size: 1.5rem;
+    }
+
+    .brand-title {
+      font-weight: 700;
+      font-size: 1.25rem;
+      line-height: 1.2;
+    }
+
+    .sidebar-description {
+      font-size: 0.9rem;
+      line-height: 1.5;
+      opacity: 0.9;
+    }
+
+    /* Main Content */
+    .main-content {
+      margin-left: 220px;
+      flex: 1;
+      padding: 3rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      max-width: 1200px;
+    }
+
+    /* Search Bar */
+    .search-container {
+      display: flex;
+      width: 100%;
+      max-width: 500px;
+      gap: 0.5rem;
+      margin-bottom: 3rem;
+    }
+
+    .search-input {
+      flex: 1;
+      padding: 0.75rem 1.5rem;
+      border: 1px solid var(--table-border);
+      border-radius: 999px;
+      font-size: 1rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .search-input:focus {
+      border-color: var(--accent-green);
+    }
+
+    .search-button {
+      background-color: var(--accent-green);
+      color: var(--text-light);
+      border: none;
+      border-radius: 50%;
+      width: 46px;
+      height: 46px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .search-button:hover {
+      background-color: var(--accent-green-hover);
+    }
+
+    .search-button svg {
+      width: 20px;
+      height: 20px;
+      fill: currentColor;
+    }
+
+    /* Status Sections */
+    .status-section {
+      text-align: center;
+      margin-bottom: 2rem;
+      width: 100%;
+    }
+
+    .hidden {
+      display: none !important;
+    }
+
+    .loading-spinner {
+      border: 4px solid var(--table-border);
+      border-top: 4px solid var(--accent-green);
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 0 auto 1rem;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .error-text {
+      color: var(--error-red);
+      font-weight: 500;
+    }
+
+    /* Results Table */
+    .results-container {
+      width: 100%;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      overflow: hidden;
+      border: 1px solid var(--table-border);
+      margin-bottom: 2rem;
+    }
+
+    .results-header {
+      padding: 1.5rem;
+      border-bottom: 1px solid var(--table-border);
+      font-weight: 600;
+      color: var(--text-dark);
+    }
+
+    .table-wrapper {
+      width: 100%;
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+
+    th, td {
+      padding: 1rem 1.5rem;
+      white-space: nowrap;
+    }
+
+    th {
+      background-color: #fff;
+      font-weight: 600;
+      font-size: 0.85rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #666;
+      border-bottom: 1px solid var(--table-border);
+    }
+
+    td {
+      font-size: 0.95rem;
+      border-bottom: 1px solid var(--table-border);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:nth-child(even) {
+      background-color: var(--table-alt-row);
+    }
+
+    .star-rating {
+      color: var(--star-gold);
+    }
+
+    /* Copy Button */
+    .copy-button {
+      background-color: var(--accent-green);
+      color: var(--text-light);
+      border: none;
+      border-radius: 999px;
+      padding: 0.75rem 2rem;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: background-color 0.2s;
+    }
+
+    .copy-button:hover {
+      background-color: var(--accent-green-hover);
+    }
+
+    .copy-button svg {
+      width: 18px;
+      height: 18px;
+      fill: currentColor;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      body {
+        flex-direction: column;
+      }
+
+      .sidebar {
+        position: static;
+        width: 100%;
+        height: auto;
+        padding: 1rem;
+        flex-direction: row;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .sidebar-description {
+        display: none;
+      }
+
+      .main-content {
+        margin-left: 0;
+        padding: 1.5rem;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <aside class="sidebar">
+    <div class="sidebar-brand">
+      <span class="brand-icon">🏠</span>
+      <h1 class="brand-title">CMA Agent Finder</h1>
+    </div>
+    <p class="sidebar-description">
+      Find the top real estate agents specializing in Comparative Market Analysis for your area.
+    </p>
+  </aside>
+
+  <main class="main-content">
+    
+    <div class="search-container">
+      <input type="text" id="zipInput" class="search-input" placeholder="Enter zip code" maxlength="5">
+      <button id="searchBtn" class="search-button" aria-label="Search">
+        <svg viewBox="0 0 24 24">
+          <path d="M15.5 14h-.79l-.28-.27A6.471 6.471 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/>
+        </svg>
+      </button>
+    </div>
+
+    <div id="loadingState" class="status-section hidden">
+      <div class="loading-spinner"></div>
+      <p>Searching agents...</p>
+    </div>
+
+    <div id="errorState" class="status-section hidden">
+      <p id="errorMessage" class="error-text">Couldn't fetch agents for this zip code. Try again or check the zip code.</p>
+    </div>
+
+    <div id="emptyState" class="status-section hidden">
+      <p>No agents found matching criteria for this zip code.</p>
+    </div>
+
+    <div id="resultsSection" class="results-container hidden">
+      <div class="results-header" id="resultsHeader">
+        0 of 0 Agents found for Zip 00000
+      </div>
+      <div class="table-wrapper">
+        <table id="agentsTable">
+          <thead>
+            <tr>
+              <th>Agent Name</th>
+              <th>Agent Number</th>
+              <th>Agent Email</th>
+              <th># Of Reviews</th>
+              <th>How Many Stars?</th>
+              <th>Properties sold within past 12 months</th>
+              <th>Years Of Experience</th>
+              <th># Of Testimonials</th>
+            </tr>
+          </thead>
+          <tbody id="agentsTableBody">
+            <!-- Rows injected here -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <button id="copyBtn" class="copy-button hidden">
+      <svg viewBox="0 0 24 24">
+        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z"/>
+      </svg>
+      <span id="copyBtnText">Copy to Clipboard</span>
+    </button>
+
+  </main>
+
+  <script src="scoring.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

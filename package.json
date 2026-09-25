@@ -1,0 +1,9 @@
+{
+  "name": "cma-agent-finder",
+  "version": "1.0.0",
+  "description": "Find and rank top real estate agents by zip code for CMA research",
+  "private": true,
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
